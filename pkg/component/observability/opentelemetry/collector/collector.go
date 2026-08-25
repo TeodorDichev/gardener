@@ -58,6 +58,9 @@ const (
 
 	metricsPort                    = 8888
 	timeoutWaitForManagedResources = 2 * time.Minute
+
+	memoryLimitMiB      = 3000
+	memorySpikeLimitMiB = 600
 )
 
 // Values is the values for OpenTelemetry Collector configurations
@@ -297,6 +300,9 @@ func (o *otelCollector) vpa() *vpaautoscalingv1.VerticalPodAutoscaler {
 						MinAllowed: corev1.ResourceList{
 							corev1.ResourceMemory: resource.MustParse("64Mi"),
 						},
+						MaxAllowed: corev1.ResourceList{
+							corev1.ResourceMemory: resource.MustParse("2400Mi"),
+						},
 						ControlledValues: new(vpaautoscalingv1.ContainerControlledValuesRequestsOnly),
 					},
 					{
@@ -411,6 +417,14 @@ func (o *otelCollector) openTelemetryCollector(namespace, lokiEndpoint, genericT
 						corev1.ResourceMemory: resource.MustParse("64Mi"),
 					},
 				},
+				// As per the OpenTelemetry memory_limiter documentation, GOMEMLIMIT should be set to 80% of hard memory limit of the memory_limiter
+				// Ref: https://github.com/open-telemetry/opentelemetry-collector/tree/main/processor/memorylimiterprocessor#best-practices
+				Env: []corev1.EnvVar{
+					{
+						Name:  "GOMEMLIMIT",
+						Value: fmt.Sprintf("%dMiB", int(0.8*memoryLimitMiB)),
+					},
+				},
 				SecurityContext: &corev1.SecurityContext{
 					AllowPrivilegeEscalation: new(false),
 				},
@@ -438,8 +452,8 @@ func (o *otelCollector) openTelemetryCollector(namespace, lokiEndpoint, genericT
 						},
 						"memory_limiter": map[string]any{
 							"check_interval":  "1s",
-							"limit_mib":       3000,
-							"spike_limit_mib": 600,
+							"limit_mib":       memoryLimitMiB,
+							"spike_limit_mib": memorySpikeLimitMiB,
 						},
 						"resource/vali": map[string]any{
 							"attributes": []any{

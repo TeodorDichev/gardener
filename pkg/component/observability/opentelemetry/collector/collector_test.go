@@ -6,6 +6,7 @@ package collector_test
 
 import (
 	"context"
+	"fmt"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -296,6 +297,12 @@ var _ = Describe("OpenTelemetry Collector", func() {
 					Image:             image,
 					Replicas:          new(int32(1)),
 					PriorityClassName: "gardener-system-100",
+					Env: []corev1.EnvVar{
+						{
+							Name:  "GOMEMLIMIT",
+							Value: fmt.Sprintf("%dMiB", int(0.8*3000)),
+						},
+					},
 					SecurityContext: &corev1.SecurityContext{
 						AllowPrivilegeEscalation: new(false),
 					},
@@ -495,6 +502,9 @@ var _ = Describe("OpenTelemetry Collector", func() {
 							ContainerName: "otc-container",
 							MinAllowed: corev1.ResourceList{
 								corev1.ResourceMemory: resource.MustParse("64Mi"),
+							},
+							MaxAllowed: corev1.ResourceList{
+								corev1.ResourceMemory: resource.MustParse("2400Mi"),
 							},
 							ControlledValues: new(vpaautoscalingv1.ContainerControlledValuesRequestsOnly),
 						},
