@@ -499,6 +499,9 @@ var _ = Describe("OpenTelemetry Collector", func() {
 							MinAllowed: corev1.ResourceList{
 								corev1.ResourceMemory: resource.MustParse("64Mi"),
 							},
+							MaxAllowed: corev1.ResourceList{
+								corev1.ResourceMemory: resource.MustParse("2400Mi"),
+							},
 							ControlledValues: new(vpaautoscalingv1.ContainerControlledValuesRequestsOnly),
 						},
 						{
