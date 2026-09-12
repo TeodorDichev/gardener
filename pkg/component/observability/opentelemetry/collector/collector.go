@@ -297,6 +297,9 @@ func (o *otelCollector) vpa() *vpaautoscalingv1.VerticalPodAutoscaler {
 						MinAllowed: corev1.ResourceList{
 							corev1.ResourceMemory: resource.MustParse("64Mi"),
 						},
+						MaxAllowed: corev1.ResourceList{
+							corev1.ResourceMemory: resource.MustParse("2400Mi"),
+						},
 						ControlledValues: new(vpaautoscalingv1.ContainerControlledValuesRequestsOnly),
 					},
 					{
