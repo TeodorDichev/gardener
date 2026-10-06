@@ -55,6 +55,7 @@ const (
 	garden                        = "garden"
 	fluentBitClusterRoleName      = "fluent-operator-fluent-bit"
 	simulatedShootNamespacePrefix = "shoot--logging--test-"
+	otelCollectorDeploymentName   = "opentelemetry-collector-collector"
 )
 
 var _ = ginkgo.Describe("Seed logging testing", func() {
@@ -94,7 +95,26 @@ var _ = ginkgo.Describe("Seed logging testing", func() {
 	// Test environment setup
 	framework.CBeforeEach(func(ctx context.Context) {
 		var err error
-		checkRequiredResources(ctx, shootFramework.SeedClient)
+		seedClient := shootFramework.SeedClient.Client()
+
+		fluentBitPresent, err := isFluentBitPresent(ctx, shootFramework.SeedClient)
+		if err != nil || !fluentBitPresent {
+			ginkgo.Fail(fmt.Sprintf("Error occurred checking for required logging resources in the seed %s namespace. Ensure that the logging is enabled in GardenletConfiguration: %v", garden, err))
+		}
+
+		valiPresent, err := isValiPresent(ctx, seedClient)
+		if err != nil || !valiPresent {
+			ginkgo.Fail(fmt.Sprintf("Error occurred checking for required logging resources in the seed %s namespace. Ensure that the logging is enabled in GardenletConfiguration: %v", garden, err))
+		}
+
+		otelPresent, err := isOtelCollectorPresent(ctx, seedClient)
+		if err != nil || !otelPresent {
+			ginkgo.Fail(fmt.Sprintf("Error occurred checking for OpenTelemetry Collector in the seed %s namespace: %v", garden, err))
+		}
+
+		// TODO: Deploy the OpenTelemetry Collector into the shoot test environment so the test works
+		// when the OpenTelemetryCollector feature gate is active. This requires deploying the OTel Operator
+		// and the OpenTelemetryCollector CR into the shoot, along with TLS and RBAC resources.
 
 		// Create seedClient.Client for the shoots
 		shootClient, err = kubernetes.NewClientFromSecret(ctx,
@@ -112,9 +132,6 @@ var _ = ginkgo.Describe("Seed logging testing", func() {
 		fluentBit, err = getFluentBitDaemonSet(ctx, shootFramework.SeedClient)
 		framework.ExpectNoError(err)
 
-		// Client for the seed cluster (gcp-ha)
-		// It is used to fetch the resource definitions deployed later in the test cluster
-		seedClient := shootFramework.SeedClient.Client()
 		// Fetch the fluent-bit configuration
 		framework.ExpectNoError(
 			seedClient.Get(ctx,
@@ -599,23 +616,4 @@ func prepareClusterCRD(crd *apiextensionsv1.CustomResourceDefinition) *apiextens
 func prepareFluentBitServiceAccount(serviceAccount *corev1.ServiceAccount) *corev1.ServiceAccount {
 	serviceAccount.AutomountServiceAccountToken = new(true)
 	return serviceAccount
-}
-
-func getFluentBitDaemonSet(ctx context.Context, k8sSeedClient kubernetes.Interface) (*appsv1.DaemonSet, error) {
-	daemonSetList := &appsv1.DaemonSetList{}
-	err := k8sSeedClient.Client().List(ctx,
-		daemonSetList,
-		client.InNamespace(garden),
-		client.MatchingLabels{
-			v1beta1constants.LabelApp:   v1beta1constants.DaemonSetNameFluentBit,
-			v1beta1constants.GardenRole: v1beta1constants.GardenRoleLogging,
-		})
-	if err != nil {
-		return nil, err
-	}
-	if len(daemonSetList.Items) == 0 {
-		return nil, fmt.Errorf("fluent-bit daemonset not found")
-	}
-
-	return daemonSetList.Items[0].DeepCopy(), nil
 }
