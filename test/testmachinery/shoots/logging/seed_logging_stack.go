@@ -15,6 +15,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	schedulingv1 "k8s.io/api/scheduling/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -47,15 +48,16 @@ const (
 
 // Test environment constants
 const (
-	fluentBitName                 = "fluent-bit"
-	fluentBitConfigVolumeName     = "config"
-	valiName                      = "vali"
-	loggingServiceName            = "logging"
-	valiConfigDiskName            = "config"
-	garden                        = "garden"
-	fluentBitClusterRoleName      = "fluent-operator-fluent-bit"
-	simulatedShootNamespacePrefix = "shoot--logging--test-"
-	otelCollectorDeploymentName   = "opentelemetry-collector-collector"
+	fluentBitName                   = "fluent-bit"
+	fluentBitConfigVolumeName       = "config"
+	valiName                        = "vali"
+	loggingServiceName              = "logging"
+	valiConfigDiskName              = "config"
+	garden                          = "garden"
+	fluentBitClusterRoleName        = "fluent-operator-fluent-bit"
+	simulatedShootNamespacePrefix   = "shoot--logging--test-"
+	otelCollectorDeploymentName     = "opentelemetry-collector-collector"
+	otelCollectorServiceAccountName = "opentelemetry-collector"
 )
 
 var _ = ginkgo.Describe("Seed logging testing", func() {
@@ -79,6 +81,12 @@ var _ = ginkgo.Describe("Seed logging testing", func() {
 		shootValiSts           = &appsv1.StatefulSet{}
 		shootValiPriorityClass = &schedulingv1.PriorityClass{}
 		shootValiConfMap       = &corev1.ConfigMap{}
+
+		otelCollectorDeployment     = &appsv1.Deployment{}
+		otelCollectorService        = &corev1.Service{}
+		otelCollectorServiceAccount = &corev1.ServiceAccount{}
+		otelCollectorPriorityClass  = &schedulingv1.PriorityClass{}
+		otelCollectorConfMap        = &corev1.ConfigMap{}
 
 		// This shoot is used as seed for this test only
 		shootClient     kubernetes.Interface
@@ -108,13 +116,45 @@ var _ = ginkgo.Describe("Seed logging testing", func() {
 		}
 
 		otelPresent, err := isOtelCollectorPresent(ctx, seedClient)
-		if err != nil || !otelPresent {
+		if err != nil && !apierrors.IsNotFound(err) {
 			ginkgo.Fail(fmt.Sprintf("Error occurred checking for OpenTelemetry Collector in the seed %s namespace: %v", garden, err))
 		}
+		if otelPresent {
+			// OpenTelemetry feature gate is enabled, deploy the collector into the test environment
+			framework.ExpectNoError(
+				seedClient.Get(ctx,
+					types.NamespacedName{Namespace: v1beta1constants.GardenNamespace, Name: otelCollectorDeploymentName},
+					otelCollectorDeployment),
+			)
 
-		// TODO: Deploy the OpenTelemetry Collector into the shoot test environment so the test works
-		// when the OpenTelemetryCollector feature gate is active. This requires deploying the OTel Operator
-		// and the OpenTelemetryCollector CR into the shoot, along with TLS and RBAC resources.
+			framework.ExpectNoError(
+				seedClient.Get(ctx,
+					types.NamespacedName{Namespace: v1beta1constants.GardenNamespace, Name: otelCollectorDeploymentName},
+					otelCollectorService),
+			)
+
+			framework.ExpectNoError(
+				seedClient.Get(ctx,
+					types.NamespacedName{Namespace: v1beta1constants.GardenNamespace, Name: otelCollectorServiceAccountName},
+					otelCollectorServiceAccount),
+			)
+
+			otelPriorityClassName := otelCollectorDeployment.Spec.Template.Spec.PriorityClassName
+			if otelPriorityClassName != "" {
+				framework.ExpectNoError(
+					seedClient.Get(ctx,
+						types.NamespacedName{Name: otelPriorityClassName},
+						otelCollectorPriorityClass),
+				)
+			}
+
+			otelConfMapName := getConfigMapName(otelCollectorDeployment.Spec.Template.Spec.Volumes, "otc-internal")
+			framework.ExpectNoError(
+				seedClient.Get(ctx,
+					types.NamespacedName{Namespace: v1beta1constants.GardenNamespace, Name: otelConfMapName},
+					otelCollectorConfMap),
+			)
+		}
 
 		// Create seedClient.Client for the shoots
 		shootClient, err = kubernetes.NewClientFromSecret(ctx,
@@ -340,6 +380,32 @@ var _ = ginkgo.Describe("Seed logging testing", func() {
 			create(ctx, shootClient.Client(), prepareClusterCRD(clusterCRD)),
 		)
 
+		if otelCollectorDeployment.Name != "" {
+			ginkgo.By("Deploy the OpenTelemetry Collector")
+			framework.ExpectNoError(
+				create(ctx, client, otelCollectorServiceAccount),
+			)
+			if otelCollectorPriorityClass.Name != "" {
+				framework.ExpectNoError(
+					create(ctx, client, otelCollectorPriorityClass),
+				)
+			}
+			framework.ExpectNoError(
+				create(ctx, client, prepareOtelCollectorService(otelCollectorService)),
+			)
+			framework.ExpectNoError(
+				create(ctx, client, otelCollectorConfMap),
+			)
+			framework.ExpectNoError(
+				create(ctx, client, otelCollectorDeployment),
+			)
+
+			ginkgo.By("Wait until OpenTelemetry Collector is ready")
+			framework.ExpectNoError(
+				shootFramework.WaitUntilDeploymentIsReady(ctx, otelCollectorDeploymentName, v1beta1constants.GardenNamespace, shootFramework.ShootClient),
+			)
+		}
+
 		ginkgo.By("Deploy the fluent-bit RBAC")
 		framework.ExpectNoError(
 			create(ctx, client, prepareFluentBitServiceAccount(fluentBitServiceAccount)),
@@ -394,6 +460,14 @@ var _ = ginkgo.Describe("Seed logging testing", func() {
 			framework.ExpectNoError(
 				create(ctx, client, loggingShootService),
 			)
+
+			if otelCollectorDeployment.Name != "" {
+				ginkgo.By(fmt.Sprintf("Deploy the OpenTelemetry Collector in shoot namespace %s", shootNamespace.Name))
+				framework.ExpectNoError(create(ctx, client, prepareShootOtelCollectorServiceAccount(otelCollectorServiceAccount, shootNamespace.Name)))
+				framework.ExpectNoError(create(ctx, client, prepareShootOtelCollectorService(otelCollectorService, shootNamespace.Name)))
+				framework.ExpectNoError(create(ctx, client, prepareShootOtelCollectorConfigMap(otelCollectorConfMap, shootNamespace.Name)))
+				framework.ExpectNoError(create(ctx, client, prepareShootOtelCollectorDeployment(otelCollectorDeployment, shootNamespace.Name)))
+			}
 
 			ginkgo.By(fmt.Sprintf("Deploy the logger application in shoot namespace %s", shootNamespace.Name))
 			loggerParams := map[string]any{
@@ -474,6 +548,13 @@ var _ = ginkgo.Describe("Seed logging testing", func() {
 				kubernetesutils.DeleteObject(ctx, shootFramework.ShootClient.Client(), loggingShootService),
 			)
 
+			if otelCollectorDeployment.Name != "" {
+				framework.ExpectNoError(kubernetesutils.DeleteObject(ctx, shootFramework.ShootClient.Client(), prepareShootOtelCollectorDeployment(otelCollectorDeployment, shootNamespace.Name)))
+				framework.ExpectNoError(kubernetesutils.DeleteObject(ctx, shootFramework.ShootClient.Client(), prepareShootOtelCollectorService(otelCollectorService, shootNamespace.Name)))
+				framework.ExpectNoError(kubernetesutils.DeleteObject(ctx, shootFramework.ShootClient.Client(), prepareShootOtelCollectorServiceAccount(otelCollectorServiceAccount, shootNamespace.Name)))
+				framework.ExpectNoError(kubernetesutils.DeleteObject(ctx, shootFramework.ShootClient.Client(), prepareShootOtelCollectorConfigMap(otelCollectorConfMap, shootNamespace.Name)))
+			}
+
 			// Delete the shoot namespace
 			framework.ExpectNoError(
 				kubernetesutils.DeleteObject(ctx, shootFramework.ShootClient.Client(), shootNamespace),
@@ -498,13 +579,62 @@ var _ = ginkgo.Describe("Seed logging testing", func() {
 			shootValiSts,
 			shootValiPriorityClass,
 			shootValiConfMap,
-			newGardenNamespace(v1beta1constants.GardenNamespace),
 		}
+		if otelCollectorDeployment.Name != "" {
+			objectsToDelete = append(objectsToDelete,
+				otelCollectorDeployment,
+				otelCollectorService,
+				otelCollectorServiceAccount,
+				otelCollectorConfMap,
+			)
+			if otelCollectorPriorityClass.Name != "" {
+				objectsToDelete = append(objectsToDelete, otelCollectorPriorityClass)
+			}
+		}
+		objectsToDelete = append(objectsToDelete, newGardenNamespace(v1beta1constants.GardenNamespace))
 		for _, object := range objectsToDelete {
 			framework.ExpectNoError(kubernetesutils.DeleteObject(ctx, shootFramework.ShootClient.Client(), object))
 		}
 	}, loggerDeploymentCleanupTimeout))
 })
+
+func prepareOtelCollectorService(service *corev1.Service) *corev1.Service {
+	service.Spec.ClusterIP = ""
+	service.Spec.ClusterIPs = nil
+	return service
+}
+
+func prepareShootOtelCollectorServiceAccount(sa *corev1.ServiceAccount, namespace string) *corev1.ServiceAccount {
+	copy := sa.DeepCopy()
+	copy.Namespace = namespace
+	return copy
+}
+
+func prepareShootOtelCollectorService(service *corev1.Service, namespace string) *corev1.Service {
+	copy := service.DeepCopy()
+	copy.Namespace = namespace
+	copy.Spec.ClusterIP = ""
+	copy.Spec.ClusterIPs = nil
+	return copy
+}
+
+func prepareShootOtelCollectorConfigMap(confMap *corev1.ConfigMap, namespace string) *corev1.ConfigMap {
+	copy := confMap.DeepCopy()
+	copy.Namespace = namespace
+	copy.Name = otelCollectorDeploymentName
+	return copy
+}
+
+func prepareShootOtelCollectorDeployment(deployment *appsv1.Deployment, namespace string) *appsv1.Deployment {
+	copy := deployment.DeepCopy()
+	copy.Namespace = namespace
+	for i, vol := range copy.Spec.Template.Spec.Volumes {
+		if vol.Name == "otc-internal" && vol.ConfigMap != nil {
+			copy.Spec.Template.Spec.Volumes[i].ConfigMap.Name = otelCollectorDeploymentName
+		}
+	}
+	return copy
+}
 
 func prepareGardenLoggingService(service *corev1.Service) *corev1.Service {
 	// Remove the cluster IP because it could be already in use
