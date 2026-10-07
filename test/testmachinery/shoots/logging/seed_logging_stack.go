@@ -608,35 +608,35 @@ func prepareOtelCollectorService(service *corev1.Service) *corev1.Service {
 }
 
 func prepareShootOtelCollectorServiceAccount(sa *corev1.ServiceAccount, namespace string) *corev1.ServiceAccount {
-	copy := sa.DeepCopy()
-	copy.Namespace = namespace
-	return copy
+	obj := sa.DeepCopy()
+	obj.Namespace = namespace
+	return obj
 }
 
 func prepareShootOtelCollectorService(service *corev1.Service, namespace string) *corev1.Service {
-	copy := service.DeepCopy()
-	copy.Namespace = namespace
-	copy.Spec.ClusterIP = ""
-	copy.Spec.ClusterIPs = nil
-	return copy
+	obj := service.DeepCopy()
+	obj.Namespace = namespace
+	obj.Spec.ClusterIP = ""
+	obj.Spec.ClusterIPs = nil
+	return obj
 }
 
 func prepareShootOtelCollectorConfigMap(confMap *corev1.ConfigMap, namespace string) *corev1.ConfigMap {
-	copy := confMap.DeepCopy()
-	copy.Namespace = namespace
-	copy.Name = otelCollectorDeploymentName
-	return copy
+	obj := confMap.DeepCopy()
+	obj.Namespace = namespace
+	obj.Name = otelCollectorDeploymentName
+	return obj
 }
 
 func prepareShootOtelCollectorDeployment(deployment *appsv1.Deployment, namespace string) *appsv1.Deployment {
-	copy := deployment.DeepCopy()
-	copy.Namespace = namespace
-	for i, vol := range copy.Spec.Template.Spec.Volumes {
+	obj := deployment.DeepCopy()
+	obj.Namespace = namespace
+	for i, vol := range obj.Spec.Template.Spec.Volumes {
 		if vol.Name == "otc-internal" && vol.ConfigMap != nil {
-			copy.Spec.Template.Spec.Volumes[i].ConfigMap.Name = otelCollectorDeploymentName
+			obj.Spec.Template.Spec.Volumes[i].ConfigMap.Name = otelCollectorDeploymentName
 		}
 	}
-	return copy
+	return obj
 }
 
 func prepareGardenLoggingService(service *corev1.Service) *corev1.Service {
