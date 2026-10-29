@@ -5,17 +5,27 @@
 package logging
 
 import (
+	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
+	v1beta1constants "github.com/gardener/gardener/pkg/apis/core/v1beta1/constants"
+	operatorv1alpha1 "github.com/gardener/gardener/pkg/apis/operator/v1alpha1"
 	. "github.com/onsi/gomega"
+	istiov1 "istio.io/client-go/pkg/apis/networking/v1alpha3"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/gardener/gardener/pkg/client/kubernetes"
@@ -97,6 +107,7 @@ func GetLogCountFromSearchResponse(search *SearchResponse) (int, error) {
 		if !ok {
 			return 0, errors.New("Data.Result.Value[1] is not a string")
 		}
+
 		current, err := strconv.Atoi(currentStr)
 		if err != nil {
 			return 0, errors.New("Data.Result.Value[1] string is not parsable to integer")
@@ -130,4 +141,206 @@ func GetValiLogs(ctx context.Context, valiLabels map[string]string, valiNamespac
 	}
 
 	return search, nil
+}
+
+// vlCountResponse is the JSON response from a VictoriaLogs stats count query
+type vlCountResponse struct {
+	Total string `json:"total"`
+}
+
+// victoriaLogsConn holds the resolved connection parameters for a VictoriaLogs ingress endpoint.
+type victoriaLogsConn struct {
+	host       string
+	httpClient *http.Client
+	username   string
+	password   string
+}
+
+// GetVictoriaLogs gets logs from the last <minutes> minutes for <key>=~<value> from a VictoriaLogs
+// instance in <namespace>, using <vsName> as the VirtualService name to resolve the ingress host.
+// The auth secret name and CA secret name are read from the VirtualService labels.
+func GetVictoriaLogs(ctx context.Context, minutes int, namespace, vsName, key, value string, k8sClient kubernetes.Interface) (int, error) {
+	vs, err := getVictoriaLogsVirtualService(ctx, namespace, vsName, k8sClient)
+	if err != nil {
+		return 0, err
+	}
+
+	authSecretName := vs.Labels[v1beta1constants.LabelBasicAuthSecretName]
+	caSecretName := caSecretNameForAuthSecret(authSecretName)
+
+	username, password, err := getVictoriaLogsCredentials(ctx, namespace, vsName, authSecretName, k8sClient)
+	if err != nil {
+		return 0, err
+	}
+
+	caPool, err := victoriaLogsIngressCAPool(ctx, namespace, caSecretName, k8sClient)
+	if err != nil {
+		return 0, err
+	}
+
+	conn := resolveVictoriaLogsConn(vs, username, password, caPool)
+	params := url.Values{}
+	params.Set("query", fmt.Sprintf("%s:~\"%s\" _time:%dm | stats count() as total", key, value, minutes))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://"+conn.host+"/select/logsql/query",
+		strings.NewReader(params.Encode()),
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetBasicAuth(conn.username, conn.password)
+	resp, err := conn.httpClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
+	}
+
+	return decodeVictoriaLogsJSON(body)
+}
+
+// QueryVictoriaLogsStatus resolves the ingress host and CA pool for <vsName> in <namespace>, sends
+// a single query request with the given credentials (pass empty strings for no auth), and returns
+// the HTTP status code.
+func QueryVictoriaLogsStatus(ctx context.Context, namespace, vsName, username, password string, k8sClient kubernetes.Interface) (int, error) {
+	vs, err := getVictoriaLogsVirtualService(ctx, namespace, vsName, k8sClient)
+	if err != nil {
+		return 0, err
+	}
+
+	caPool, err := victoriaLogsIngressCAPool(ctx, namespace, caSecretNameForAuthSecret(vs.Labels[v1beta1constants.LabelBasicAuthSecretName]), k8sClient)
+	if err != nil {
+		return 0, err
+	}
+
+	conn := resolveVictoriaLogsConn(vs, username, password, caPool)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://"+conn.host+"/select/logsql/query",
+		strings.NewReader("query=*&start=now-1m&limit=1"),
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if username != "" || password != "" {
+		req.SetBasicAuth(username, password)
+	}
+
+	resp, err := conn.httpClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode, nil
+}
+
+// resolveVictoriaLogsConn resolves the ingress host, CA pool, and credentials for the given VirtualService.
+func resolveVictoriaLogsConn(vs *istiov1.VirtualService, username, password string, caPool *x509.CertPool) *victoriaLogsConn {
+	return &victoriaLogsConn{
+		host: vs.Spec.Hosts[0],
+		httpClient: &http.Client{Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{RootCAs: caPool},
+		}},
+		username: username,
+		password: password,
+	}
+}
+
+func getVictoriaLogsVirtualService(ctx context.Context, namespace, vsName string, k8sClient kubernetes.Interface) (*istiov1.VirtualService, error) {
+	vs := &istiov1.VirtualService{}
+	if err := k8sClient.Client().Get(ctx, types.NamespacedName{Name: vsName, Namespace: namespace}, vs); err != nil {
+		return nil, fmt.Errorf("failed to get %s VirtualService: %w", vsName, err)
+	}
+	if len(vs.Spec.Hosts) == 0 {
+		return nil, fmt.Errorf("%s VirtualService has no hosts", vsName)
+	}
+
+	return vs, nil
+}
+
+func getVictoriaLogsCredentials(ctx context.Context, namespace, vsName, authSecretName string, k8sClient kubernetes.Interface) (string, string, error) {
+	if authSecretName == "" {
+		return "", "", fmt.Errorf("%s VirtualService has no %s label", vsName, v1beta1constants.LabelBasicAuthSecretName)
+	}
+
+	username, password, err := victoriaLogsIngressCredentials(ctx, namespace, authSecretName, k8sClient)
+	if err != nil {
+		return "", "", err
+	}
+
+	return username, password, nil
+}
+
+// caSecretNameForAuthSecret returns the secrets-manager name label for the CA secret that corresponds to the given auth secret.
+func caSecretNameForAuthSecret(authSecretName string) string {
+	switch {
+	case authSecretName == v1beta1constants.SecretNameObservabilityIngress:
+		return operatorv1alpha1.SecretNameCARuntime
+	case strings.HasPrefix(authSecretName, "seed-"):
+		return v1beta1constants.SecretNameCASeed
+	default:
+		return v1beta1constants.SecretNameCACluster
+	}
+}
+
+// victoriaLogsIngressCredentials returns the username and password from the named auth secret.
+func victoriaLogsIngressCredentials(ctx context.Context, namespace, authSecretName string, k8sClient kubernetes.Interface) (username, password string, err error) {
+	secretList := &corev1.SecretList{}
+	if err := k8sClient.Client().List(ctx, secretList,
+		client.InNamespace(namespace),
+		client.MatchingLabels{"name": authSecretName},
+	); err != nil {
+		return "", "", fmt.Errorf("failed to list %s secrets: %w", authSecretName, err)
+	}
+
+	if len(secretList.Items) == 0 {
+		return "", "", fmt.Errorf("%s secret not found", authSecretName)
+	}
+
+	secret := secretList.Items[0]
+	return string(secret.Data["username"]), string(secret.Data["password"]), nil
+}
+
+// victoriaLogsIngressCAPool returns an x509 cert pool loaded from the named CA secret.
+func victoriaLogsIngressCAPool(ctx context.Context, namespace, caSecretName string, k8sClient kubernetes.Interface) (*x509.CertPool, error) {
+	secretList := &corev1.SecretList{}
+	if err := k8sClient.Client().List(ctx, secretList,
+		client.InNamespace(namespace),
+		client.MatchingLabels{"name": caSecretName},
+	); err != nil {
+		return nil, fmt.Errorf("failed to list %s secrets: %w", caSecretName, err)
+	}
+
+	if len(secretList.Items) == 0 {
+		return nil, fmt.Errorf("%s secret not found", caSecretName)
+	}
+
+	caCert := secretList.Items[0].Data["ca.crt"]
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(caCert) {
+		return nil, errors.New("failed to parse CA certificate")
+	}
+
+	return pool, nil
+}
+
+// decodeVictoriaLogsJSON decodes a JSON response body.
+func decodeVictoriaLogsJSON(body []byte) (int, error) {
+	var entry vlCountResponse
+
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&entry); err != nil {
+		return 0, err
+	}
+
+	return strconv.Atoi(entry.Total)
 }
