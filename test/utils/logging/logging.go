@@ -35,7 +35,7 @@ var (
 type SearchResponse struct {
 	Data struct {
 		Result []struct {
-			Values []any `json:"values"`
+			Value []any `json:"value"`
 		} `json:"result"`
 	} `json:"data"`
 }
@@ -86,20 +86,27 @@ func PodExecByLabel(ctx context.Context, client kubernetes.Interface, namespace 
 }
 
 // GetLogCountFromSearchResponse extracts the log count from the search response.
-func GetLogCountFromSearchResponse(search *SearchResponse) int {
-	total := 0
+func GetLogCountFromSearchResponse(search *SearchResponse) (int, error) {
+	var actual int
 	for _, result := range search.Data.Result {
-		total += len(result.Values)
+		currentStr, ok := result.Value[1].(string)
+		if !ok {
+			return 0, errors.New("Data.Result.Value[1] is not a string")
+		}
+		current, err := strconv.Atoi(currentStr)
+		if err != nil {
+			return 0, errors.New("Data.Result.Value[1] string is not parsable to integer")
+		}
+		actual += current
 	}
-
-	return total
+	return actual, nil
 }
 
 // GetValiLogs gets logs from the last 1 hour for <key>, <value> from the vali instance in <valiNamespace>
 func GetValiLogs(ctx context.Context, valiLabels map[string]string, valiNamespace, key, value string, client kubernetes.Interface) (*SearchResponse, error) {
 	valiLabelsSelector := labels.SelectorFromSet(valiLabels)
 
-	query := fmt.Sprintf("query={%s=~\"%s\"}", key, value)
+	query := fmt.Sprintf("query=count_over_time({%s=~\"%s\"}[1h])", key, value)
 
 	var stdout io.Reader
 	var err error
@@ -107,7 +114,7 @@ func GetValiLogs(ctx context.Context, valiLabels map[string]string, valiNamespac
 	// Retry potentially multiple times as vali may be evicted by VPA.
 	Eventually(ctx, func() error {
 		stdout, _, err = PodExecByLabel(ctx, client, valiNamespace, valiLabelsSelector, valiLogging,
-			"wget", "http://localhost:"+strconv.Itoa(valiPort)+"/vali/api/v1/query_range?limit=200", "-O-", "--post-data="+query,
+			"wget", "http://localhost:"+strconv.Itoa(valiPort)+"/vali/api/v1/query", "-O-", "--post-data="+query,
 		)
 		return err
 	}, 45*time.Second, 1*time.Second).Should(Succeed())
