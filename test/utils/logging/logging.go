@@ -50,7 +50,7 @@ type SearchResponse struct {
 	} `json:"data"`
 }
 
-// SearchResponseVL represents a custom responce for the logsql query
+// SearchResponseVL represents a custom response for the logsql query
 type statsCountResponseVL struct {
 	Total string `json:"total"`
 }
