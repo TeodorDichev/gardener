@@ -12,7 +12,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	. "github.com/gardener/gardener/test/e2e/gardener"
-	"github.com/gardener/gardener/test/utils/shoots/logging"
+	"github.com/gardener/gardener/test/utils/logging"
 )
 
 // ItShouldWaitForLogsCountWithLabelToBeInVali waits for a specific number of logs with a given label to be present in Vali.
@@ -26,7 +26,12 @@ func ItShouldWaitForLogsCountWithLabelToBeInVali(tc *ShootContext, valiLabels ma
 				return err
 			}
 
-			if logCount := logging.GetLogCountFromSearchResponse(searchResponse); logCount != expectedLogCount {
+			logCount, err := logging.GetLogCountFromSearchResponse(searchResponse)
+			if err != nil {
+				return fmt.Errorf("failed to parse log count for %s=%s: %w", key, value, err)
+			}
+
+			if logCount != expectedLogCount {
 				return fmt.Errorf("expected %d logs in Vali for %s=%s, but got %d", expectedLogCount, key, value, logCount)
 			}
 
@@ -46,7 +51,12 @@ func ItShouldWaitForLogsWithLabelToBeInVali(tc *ShootContext, valiLabels map[str
 				return err
 			}
 
-			if logging.GetLogCountFromSearchResponse(searchResponse) == 0 {
+			logCount, err := logging.GetLogCountFromSearchResponse(searchResponse)
+			if err != nil {
+				return fmt.Errorf("failed to parse log count for %s=%s: %w", key, value, err)
+			}
+
+			if logCount == 0 {
 				return fmt.Errorf("no logs in Vali for %s=%s", key, value)
 			}
 
@@ -71,7 +81,12 @@ func ItShouldWaitForLogsWithLabelToNotBeInVali(tc *ShootContext, valiLabels map[
 				return err
 			}
 
-			if logging.GetLogCountFromSearchResponse(searchResponse) > 0 {
+			logCount, err := logging.GetLogCountFromSearchResponse(searchResponse)
+			if err != nil {
+				return fmt.Errorf("failed to parse log count for %s=%s: %w", key, value, err)
+			}
+
+			if logCount > 0 {
 				return fmt.Errorf("found logs in Vali for %s=%s when they were unexpected", key, value)
 			}
 
