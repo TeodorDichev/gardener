@@ -89,6 +89,10 @@ func PodExecByLabel(ctx context.Context, client kubernetes.Interface, namespace 
 func GetLogCountFromSearchResponse(search *SearchResponse) (int, error) {
 	var actual int
 	for _, result := range search.Data.Result {
+		if len(result.Value) < 2 {
+			return 0, fmt.Errorf("Result.Value expects at least 2 elements, but has %d", len(result.Value))
+		}
+
 		currentStr, ok := result.Value[1].(string)
 		if !ok {
 			return 0, errors.New("Data.Result.Value[1] is not a string")
