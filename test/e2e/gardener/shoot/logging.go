@@ -130,6 +130,59 @@ func ShootLoggingVl(tc *ShootContext) {
 	ItShouldWaitForLogsByKeyNotToBeInGardenVictoriaLogs(tc.SeedContext, "k8s.pod.name", nonGardenerLoggerName+".*")
 }
 
+// SeedLoggingVl checks the seed-side routing of the shoot logging stack of VictoriaLogs.
+// It deploys two logger applications. One in the shoot's control-plane namespace on the
+// seed, and another in the seed's garden namespace. Both loggers are asserted to appear
+// only in their respective VictoriaLogs instance and not in the other.
+// Garden VictoriaLogs ingress auth is also verified.
+//
+// Function is exposed so that it can be called from the context of another e2e test.
+// This is done so that we can minimize the number of shoot clusters that we create.
+//
+// The test expects that the VictoriaLogsBackend and OpenTelemetryCollector are true.
+func SeedLoggingVl(tc *ShootContext) {
+	itShouldSetUpShootAndSeedContext(tc)
+
+	ItShouldHaveVictoriaLogsReady(tc)
+	ItShouldHaveVictoriaLogsReadyInGarden(tc.SeedContext)
+
+	controlPlaneLoggerName := "seed-cp-logger" + "-" + utilrand.String(randomLength)
+	gardenNamespaceLoggerName := "seed-garden-ns-logger" + "-" + utilrand.String(randomLength)
+
+	// We omit "HelmDeployNamespace" - because its known only at runtime
+	cpLoggerParams := map[string]any{
+		"LoggerName":   controlPlaneLoggerName,
+		"AppLabel":     controlPlaneLoggerName,
+		"LogsCount":    shootLogsCount,
+		"LogsDuration": "20s",
+	}
+	ItShouldRenderAndDeployTemplateToShootControlPlane(tc, loggerAppName, cpLoggerParams)
+
+	cpLoggerLabels := labels.SelectorFromSet(map[string]string{"app": controlPlaneLoggerName})
+	ItShouldWaitForPodsInShootControlPlaneToBeReady(tc, cpLoggerLabels)
+
+	gardenNsLoggerParams := map[string]any{
+		"LoggerName":          gardenNamespaceLoggerName,
+		"HelmDeployNamespace": "garden",
+		"AppLabel":            gardenNamespaceLoggerName,
+		"LogsCount":           shootLogsCount,
+		"LogsDuration":        "20s",
+	}
+	seed.ItShouldRenderAndDeployTemplateToGarden(tc.SeedContext, loggerAppName, gardenNsLoggerParams)
+
+	gardenNsLoggerLabels := labels.SelectorFromSet(map[string]string{"app": gardenNamespaceLoggerName})
+	seed.ItShouldWaitForPodsInGardenNamespaceToBeReady(tc.SeedContext, gardenNsLoggerLabels)
+
+	ItShouldRejectUnauthenticatedVictoriaLogsRequestInGarden(tc.SeedContext)
+	ItShouldRejectWrongCredentialsVictoriaLogsRequestInGarden(tc.SeedContext)
+
+	ItShouldWaitForLogsCountByKeyToBeInShootVictoriaLogs(tc, "k8s.pod.name", controlPlaneLoggerName+".*", shootLogsCount)
+	ItShouldWaitForLogsByKeyNotToBeInShootVictoriaLogs(tc, "k8s.pod.name", gardenNamespaceLoggerName+".*")
+
+	ItShouldWaitForLogsCountByKeyToBeInGardenVictoriaLogs(tc.SeedContext, "k8s.pod.name", gardenNamespaceLoggerName+".*", shootLogsCount)
+	ItShouldWaitForLogsByKeyNotToBeInGardenVictoriaLogs(tc.SeedContext, "k8s.pod.name", controlPlaneLoggerName+".*")
+}
+
 func itShouldSetUpShootAndSeedContext(tc *ShootContext) {
 	ItShouldWaitForShootToBeReconciledAndHealthy(tc)
 	ItShouldInitializeShootClient(tc)
