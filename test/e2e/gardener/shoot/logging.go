@@ -183,6 +183,50 @@ func SeedLoggingVl(tc *ShootContext) {
 	seed.ItShouldDeleteTemplateFromGarden(tc.SeedContext, loggerAppName, gardenNsLoggerParams)
 }
 
+// ShootLogShipper verifies that the shoot's systemd OpenTelemetry collector log shipper self-heals after its
+// auth token is broken and later restored.
+//
+// Function is exposed so that it can be called from the context of another e2e test. This is done so that we can
+// minimize the number of shoot clusters that we create.
+//
+// The test expects that the VictoriaLogsBackend and OpenTelemetryCollector feature gates are true and that shoot node
+// logging is enabled.
+func ShootLogShipper(tc *ShootContext) {
+	itShouldSetUpShootAndSeedContext(tc)
+
+	brokenLoggerName := "broken-logger" + "-" + utilrand.String(randomLength)
+	recoveredLoggerName := "recovered-logger" + "-" + utilrand.String(randomLength)
+
+	loggerParamsFor := func(name string) map[string]any {
+		return map[string]any{
+			"LoggerName":          name,
+			"HelmDeployNamespace": "kube-system",
+			"AppLabel":            name,
+			"LogsCount":           shootLogsCount,
+			"LogsDuration":        "20s",
+			"AdditionalLabels": map[string]string{
+				"origin":                              "gardener",
+				"gardener.cloud/role":                 "system-component",
+				"resources.gardener.cloud/managed-by": "gardener",
+			},
+		}
+	}
+
+	ItShouldHaveVictoriaLogsReady(tc)
+
+	ItShouldBreakOpenTelemetryCollectorToken(tc)
+
+	ItShouldRenderAndDeployTemplateToShoot(tc, loggerAppName, loggerParamsFor(brokenLoggerName))
+	ItShouldWaitForPodsInShootToBeReady(tc, "kube-system", labels.SelectorFromSet(map[string]string{"app": brokenLoggerName}))
+	ItShouldWaitForLogsWithLabelToNotBeInVictoriaLogsInShoot(tc, "k8s.pod.name", brokenLoggerName+".*")
+
+	ItShouldRestoreOpenTelemetryCollectorToken(tc)
+
+	ItShouldRenderAndDeployTemplateToShoot(tc, loggerAppName, loggerParamsFor(recoveredLoggerName))
+	ItShouldWaitForPodsInShootToBeReady(tc, "kube-system", labels.SelectorFromSet(map[string]string{"app": recoveredLoggerName}))
+	ItShouldWaitForLogsCountWithLabelToBeInVictoriaLogsInShoot(tc, "k8s.pod.name", recoveredLoggerName+".*", shootLogsCount)
+}
+
 func itShouldSetUpShootAndSeedContext(tc *ShootContext) {
 	ItShouldWaitForShootToBeReconciledAndHealthy(tc)
 	ItShouldInitializeShootClient(tc)
