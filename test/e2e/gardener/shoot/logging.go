@@ -183,6 +183,67 @@ func SeedLoggingVl(tc *ShootContext) {
 	ItShouldWaitForLogsByKeyNotToBeInGardenVictoriaLogs(tc.SeedContext, "k8s.pod.name", controlPlaneLoggerName+".*")
 }
 
+// ShootLogShipper verifies that the shoot's systemd OpenTelemetry collector log shipper self-heals after its
+// auth token is broken and later restored.
+//
+// Function is exposed so that it can be called from the context of another e2e test. This is done so that we can
+// minimize the number of shoot clusters that we create.
+//
+// The test expects that the VictoriaLogsBackend and OpenTelemetryCollector feature gates are true and that shoot node
+// logging is enabled.
+func ShootLogShipper(tc *ShootContext) {
+	itShouldSetUpShootAndSeedContext(tc)
+
+	ItShouldHaveVictoriaLogsReady(tc)
+
+	brokenLoggerName := "broken-logger" + "-" + utilrand.String(randomLength)
+	recoveredLoggerName := "recovered-logger" + "-" + utilrand.String(randomLength)
+
+	brokenLoggerParamsFor := map[string]any{
+		"LoggerName":          brokenLoggerName,
+		"HelmDeployNamespace": "kube-system",
+		"AppLabel":            brokenLoggerName,
+		"LogsCount":           shootLogsCount,
+		"LogsDuration":        "20s",
+		"AdditionalLabels": map[string]string{
+			"origin":                              "gardener",
+			"gardener.cloud/role":                 "system-component",
+			"resources.gardener.cloud/managed-by": "gardener",
+		},
+	}
+
+	recoveredLoggerParamsFor := map[string]any{
+		"LoggerName":          recoveredLoggerName,
+		"HelmDeployNamespace": "kube-system",
+		"AppLabel":            recoveredLoggerName,
+		"LogsCount":           shootLogsCount,
+		"LogsDuration":        "20s",
+		"AdditionalLabels": map[string]string{
+			"origin":                              "gardener",
+			"gardener.cloud/role":                 "system-component",
+			"resources.gardener.cloud/managed-by": "gardener",
+		},
+	}
+
+	ItShouldHaveVictoriaLogsReady(tc)
+
+	// The shoot-side token secret has a 720h lifespan; GRM reconciles at 80%.
+	// Patching it directly is safe - no restoration will happen during the test.
+	ItShouldBreakOpenTelemetryCollectorToken(tc)
+	ItShouldWaitForInvalidTokenOnNodes(tc)
+
+	ItShouldRenderAndDeployTemplateToShoot(tc, loggerAppName, brokenLoggerParamsFor)
+	ItShouldWaitForPodsInShootToBeReady(tc, "kube-system", labels.SelectorFromSet(map[string]string{"app": brokenLoggerName}))
+	ItShouldWaitForLogsByKeyNotToBeInShootVictoriaLogs(tc, "k8s.pod.name", brokenLoggerName+".*")
+
+	ItShouldRestoreOpenTelemetryCollectorToken(tc)
+	ItShouldWaitForValidTokenOnNodes(tc)
+
+	ItShouldRenderAndDeployTemplateToShoot(tc, loggerAppName, recoveredLoggerParamsFor)
+	ItShouldWaitForPodsInShootToBeReady(tc, "kube-system", labels.SelectorFromSet(map[string]string{"app": recoveredLoggerName}))
+	ItShouldWaitForLogsCountByKeyToBeInShootVictoriaLogs(tc, "k8s.pod.name", recoveredLoggerName+".*", shootLogsCount)
+}
+
 func itShouldSetUpShootAndSeedContext(tc *ShootContext) {
 	ItShouldWaitForShootToBeReconciledAndHealthy(tc)
 	ItShouldInitializeShootClient(tc)
