@@ -118,14 +118,15 @@ func ShootLoggingVl(tc *ShootContext) {
 	ItShouldRejectUnauthenticatedVictoriaLogsRequestInShoot(tc)
 	ItShouldRejectWrongCredentialsVictoriaLogsRequestInShoot(tc)
 
-	ItShouldWaitForLogsCountWithLabelToBeInVictoriaLogsInShoot(tc, "k8s.pod.name", gardenerLoggerName+".*", shootLogsCount)
-	ItShouldWaitForLogsWithLabelToNotBeInVictoriaLogsInShoot(tc, "k8s.pod.name", nonGardenerLoggerName+".*")
+	ItShouldWaitForLogsCountByKeyInVictoriaLogsInShoot(tc, "k8s.pod.name", gardenerLoggerName+".*", shootLogsCount)
+	ItShouldWaitForLogsNotByKeyInVictoriaLogsInShoot(tc, "k8s.pod.name", nonGardenerLoggerName+".*")
 
-	ItShouldWaitForLogsWithLabelToBeInVictoriaLogsInShoot(tc, "unit", "containerd.service")
-	ItShouldWaitForLogsWithLabelToBeInVictoriaLogsInShoot(tc, "unit", "kubelet.service")
+	ItShouldWaitForLogsByKeyInVictoriaLogsInShoot(tc, "unit", "containerd.service")
+	ItShouldWaitForLogsByKeyInVictoriaLogsInShoot(tc, "unit", "kubelet.service")
+	ItShouldWaitForLogsByKeyInVictoriaLogsInShoot(tc, "k8s.pod.name", "event-logger"+".*")
 
-	ItShouldWaitForLogsWithLabelToNotBeInVictoriaLogsInGarden(tc.SeedContext, "k8s.pod.name", gardenerLoggerName+".*")
-	ItShouldWaitForLogsWithLabelToNotBeInVictoriaLogsInGarden(tc.SeedContext, "k8s.pod.name", nonGardenerLoggerName+".*")
+	ItShouldWaitForLogsNotByKeyInVictoriaLogsInGarden(tc.SeedContext, "k8s.pod.name", gardenerLoggerName+".*")
+	ItShouldWaitForLogsNotByKeyInVictoriaLogsInGarden(tc.SeedContext, "k8s.pod.name", nonGardenerLoggerName+".*")
 }
 
 // SeedLoggingVl checks the seed-side routing of the shoot logging stack of VictoriaLogs.
@@ -173,11 +174,11 @@ func SeedLoggingVl(tc *ShootContext) {
 	ItShouldRejectUnauthenticatedVictoriaLogsRequestInGarden(tc.SeedContext)
 	ItShouldRejectWrongCredentialsVictoriaLogsRequestInGarden(tc.SeedContext)
 
-	ItShouldWaitForLogsCountWithLabelToBeInVictoriaLogsInShoot(tc, "k8s.pod.name", controlPlaneLoggerName+".*", shootLogsCount)
-	ItShouldWaitForLogsWithLabelToNotBeInVictoriaLogsInShoot(tc, "k8s.pod.name", gardenNamespaceLoggerName+".*")
+	ItShouldWaitForLogsCountByKeyInVictoriaLogsInShoot(tc, "k8s.pod.name", controlPlaneLoggerName+".*", shootLogsCount)
+	ItShouldWaitForLogsNotByKeyInVictoriaLogsInShoot(tc, "k8s.pod.name", gardenNamespaceLoggerName+".*")
 
-	ItShouldWaitForLogsCountWithLabelToBeInVictoriaLogsInGarden(tc.SeedContext, "k8s.pod.name", gardenNamespaceLoggerName+".*", shootLogsCount)
-	ItShouldWaitForLogsWithLabelToNotBeInVictoriaLogsInGarden(tc.SeedContext, "k8s.pod.name", controlPlaneLoggerName+".*")
+	ItShouldWaitForLogsCountByKeyInVictoriaLogsInGarden(tc.SeedContext, "k8s.pod.name", gardenNamespaceLoggerName+".*", shootLogsCount)
+	ItShouldWaitForLogsNotByKeyInVictoriaLogsInGarden(tc.SeedContext, "k8s.pod.name", controlPlaneLoggerName+".*")
 
 	// cleaning up the garden, everything else is cleaned up when the shoot is deleted
 	seed.ItShouldDeleteTemplateFromGarden(tc.SeedContext, loggerAppName, gardenNsLoggerParams)
@@ -218,13 +219,13 @@ func ShootLogShipper(tc *ShootContext) {
 
 	ItShouldRenderAndDeployTemplateToShoot(tc, loggerAppName, loggerParamsFor(brokenLoggerName))
 	ItShouldWaitForPodsInShootToBeReady(tc, "kube-system", labels.SelectorFromSet(map[string]string{"app": brokenLoggerName}))
-	ItShouldWaitForLogsWithLabelToNotBeInVictoriaLogsInShoot(tc, "k8s.pod.name", brokenLoggerName+".*")
+	ItShouldWaitForLogsNotByKeyInVictoriaLogsInShoot(tc, "k8s.pod.name", brokenLoggerName+".*")
 
 	ItShouldRestoreOpenTelemetryCollectorToken(tc)
 
 	ItShouldRenderAndDeployTemplateToShoot(tc, loggerAppName, loggerParamsFor(recoveredLoggerName))
 	ItShouldWaitForPodsInShootToBeReady(tc, "kube-system", labels.SelectorFromSet(map[string]string{"app": recoveredLoggerName}))
-	ItShouldWaitForLogsCountWithLabelToBeInVictoriaLogsInShoot(tc, "k8s.pod.name", recoveredLoggerName+".*", shootLogsCount)
+	ItShouldWaitForLogsCountByKeyInVictoriaLogsInShoot(tc, "k8s.pod.name", recoveredLoggerName+".*", shootLogsCount)
 }
 
 func itShouldSetUpShootAndSeedContext(tc *ShootContext) {

@@ -181,10 +181,12 @@ func resolveVictoriaLogsConn(ctx context.Context, namespace, vsName string, k8sC
 	}
 
 	return &victoriaLogsConn{
-		host:       vs.Spec.Hosts[0],
-		httpClient: &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: caPool}}},
-		username:   username,
-		password:   password,
+		host: vs.Spec.Hosts[0],
+		httpClient: &http.Client{Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{RootCAs: caPool},
+		}},
+		username: username,
+		password: password,
 	}, nil
 }
 

@@ -34,7 +34,7 @@ func ItShouldHaveVictoriaLogsReady(tc *ShootContext) {
 		Eventually(ctx, func(g Gomega) {
 			g.Expect(tc.SeedClient.Get(ctx, types.NamespacedName{Name: "victoria-logs", Namespace: tc.ControlPlaneNamespace}, vl)).To(Succeed())
 			g.Expect(vl.Status.UpdateStatus).To(Equal(victoriametricsv1beta1.UpdateStatusOperational))
-		}).Should(Succeed())
+		}).WithPolling(time.Second).Should(Succeed())
 	}, SpecTimeout(5*time.Minute))
 }
 
@@ -47,82 +47,92 @@ func ItShouldHaveVictoriaLogsReadyInGarden(tc *SeedContext) {
 		Eventually(ctx, func(g Gomega) {
 			g.Expect(tc.SeedClient.Get(ctx, types.NamespacedName{Name: "victoria-logs", Namespace: "garden"}, vl)).To(Succeed())
 			g.Expect(vl.Status.UpdateStatus).To(Equal(victoriametricsv1beta1.UpdateStatusOperational))
-		}).Should(Succeed())
+		}).WithPolling(time.Second).Should(Succeed())
 	}, SpecTimeout(5*time.Minute))
 }
 
-// ItShouldWaitForLogsCountWithLabelToBeInVictoriaLogsInShoot waits for a specific number of logs with a given label to be present in shoot VictoriaLogs.
-func ItShouldWaitForLogsCountWithLabelToBeInVictoriaLogsInShoot(tc *ShootContext, key, value string, expectedLogCount int) {
+// ItShouldWaitForLogsCountByKeyInVictoriaLogsInShoot waits for a specific number of logs matching key=~value to be present in shoot VictoriaLogs.
+func ItShouldWaitForLogsCountByKeyInVictoriaLogsInShoot(tc *ShootContext, key, value string, expectedLogCount int) {
 	GinkgoHelper()
 
-	It("Wait for logs with label to appear in VictoriaLogs", func(ctx SpecContext) {
+	It("Wait for logs by key to appear in VictoriaLogs", func(ctx SpecContext) {
 		Eventually(ctx, func() error {
 			return checkLogsCount(ctx, tc.ControlPlaneNamespace, "victoria-logs", key, value, expectedLogCount, tc.SeedClientSet)
-		}).Should(Succeed())
-	}, SpecTimeout(15*time.Minute))
+		}).WithTimeout(60 * time.Second).WithPolling(time.Second).Should(Succeed())
+	})
 }
 
-// ItShouldWaitForLogsCountWithLabelToBeInVictoriaLogsInGarden waits for a specific number of logs with a given label to be present in garden VictoriaLogs.
-func ItShouldWaitForLogsCountWithLabelToBeInVictoriaLogsInGarden(tc *SeedContext, key, value string, expectedLogCount int) {
+// ItShouldWaitForLogsCountByKeyInVictoriaLogsInGarden waits for a specific number of logs matching key=~value to be present in garden VictoriaLogs.
+func ItShouldWaitForLogsCountByKeyInVictoriaLogsInGarden(tc *SeedContext, key, value string, expectedLogCount int) {
 	GinkgoHelper()
 
-	It("Wait for logs with label to appear in garden VictoriaLogs", func(ctx SpecContext) {
+	It("Wait for logs by key to appear in garden VictoriaLogs", func(ctx SpecContext) {
 		Eventually(ctx, func() error {
 			return checkLogsCount(ctx, "garden", "victoria-logs-garden", key, value, expectedLogCount, tc.SeedClientSet)
-		}).Should(Succeed())
-	}, SpecTimeout(15*time.Minute))
+		}).WithTimeout(60 * time.Second).WithPolling(time.Second).Should(Succeed())
+	})
 }
 
-// ItShouldWaitForLogsWithLabelToBeInVictoriaLogsInShoot waits for any logs with a given label to be present in shoot VictoriaLogs.
-func ItShouldWaitForLogsWithLabelToBeInVictoriaLogsInShoot(tc *ShootContext, key, value string) {
+// ItShouldWaitForLogsByKeyInVictoriaLogsInShoot waits for any logs matching key=~value to be present in shoot VictoriaLogs.
+func ItShouldWaitForLogsByKeyInVictoriaLogsInShoot(tc *ShootContext, key, value string) {
 	GinkgoHelper()
 
-	It("Wait for logs with label to appear in VictoriaLogs", func(ctx SpecContext) {
+	It("Wait for logs by key to appear in VictoriaLogs", func(ctx SpecContext) {
 		Eventually(ctx, func() error {
 			return checkLogsPresent(ctx, tc.ControlPlaneNamespace, "victoria-logs", key, value, tc.SeedClientSet)
-		}).Should(Succeed())
-	}, SpecTimeout(time.Minute))
+		}).WithTimeout(60 * time.Second).WithPolling(time.Second).Should(Succeed())
+	})
 }
 
-// ItShouldWaitForLogsWithLabelToBeInVictoriaLogsInGarden waits for any logs with a given label to be present in garden VictoriaLogs.
-func ItShouldWaitForLogsWithLabelToBeInVictoriaLogsInGarden(tc *SeedContext, key, value string) {
+// ItShouldWaitForLogsByKeyInVictoriaLogsInGarden waits for any logs matching key=~value to be present in garden VictoriaLogs.
+func ItShouldWaitForLogsByKeyInVictoriaLogsInGarden(tc *SeedContext, key, value string) {
 	GinkgoHelper()
 
-	It("Wait for logs with label to appear in garden VictoriaLogs", func(ctx SpecContext) {
+	It("Wait for logs by key to appear in garden VictoriaLogs", func(ctx SpecContext) {
 		Eventually(ctx, func() error {
 			return checkLogsPresent(ctx, "garden", "victoria-logs-garden", key, value, tc.SeedClientSet)
-		}).Should(Succeed())
-	}, SpecTimeout(time.Minute))
+		}).WithTimeout(60 * time.Second).WithPolling(time.Second).Should(Succeed())
+	})
 }
 
-// ItShouldWaitForLogsWithLabelToNotBeInVictoriaLogsInShoot checks that logs with a specific label are NOT present in shoot VictoriaLogs.
-func ItShouldWaitForLogsWithLabelToNotBeInVictoriaLogsInShoot(tc *ShootContext, key, value string) {
+// ItShouldWaitForLogsNotByKeyInVictoriaLogsInShoot checks that logs matching key=~value are NOT present in shoot VictoriaLogs.
+func ItShouldWaitForLogsNotByKeyInVictoriaLogsInShoot(tc *ShootContext, key, value string) {
 	GinkgoHelper()
 
 	// Consistently is used because the only way to assert absence is to observe
 	// no logs over a window of time, not just at a single point.
 	It("Ensure logs do not exist in VictoriaLogs", func(ctx SpecContext) {
-		Consistently(ctx, func(g Gomega) {
+		Consistently(ctx, func() error {
 			logCount, err := logging.GetVictoriaLogs(ctx, 60, tc.ControlPlaneNamespace, "victoria-logs", key, value, tc.SeedClientSet)
-			g.Expect(err).NotTo(HaveOccurred())
-			g.Expect(logCount).To(Equal(0), "found unexpected logs for %s=%s", key, value)
+			if err != nil {
+				return err
+			}
+			if logCount > 0 {
+				StopTrying(fmt.Sprintf("found unexpected logs for %s=%s: got %d", key, value, logCount)).Now()
+			}
+			return nil
 		}, time.Minute).WithPolling(5 * time.Second).Should(Succeed())
-	}, SpecTimeout(2*time.Minute))
+	})
 }
 
-// ItShouldWaitForLogsWithLabelToNotBeInVictoriaLogsInGarden checks that logs with a specific label are NOT present in garden VictoriaLogs.
-func ItShouldWaitForLogsWithLabelToNotBeInVictoriaLogsInGarden(tc *SeedContext, key, value string) {
+// ItShouldWaitForLogsNotByKeyInVictoriaLogsInGarden checks that logs matching key=~value are NOT present in garden VictoriaLogs.
+func ItShouldWaitForLogsNotByKeyInVictoriaLogsInGarden(tc *SeedContext, key, value string) {
 	GinkgoHelper()
 
 	// Consistently is used because the only way to assert absence is to observe
 	// no logs over a window of time, not just at a single point.
 	It("Ensure logs do not exist in garden VictoriaLogs", func(ctx SpecContext) {
-		Consistently(ctx, func(g Gomega) {
+		Consistently(ctx, func() error {
 			logCount, err := logging.GetVictoriaLogs(ctx, 60, "garden", "victoria-logs-garden", key, value, tc.SeedClientSet)
-			g.Expect(err).NotTo(HaveOccurred())
-			g.Expect(logCount).To(Equal(0), "found unexpected logs for %s=%s", key, value)
+			if err != nil {
+				return err
+			}
+			if logCount > 0 {
+				StopTrying(fmt.Sprintf("found unexpected logs for %s=%s: got %d", key, value, logCount)).Now()
+			}
+			return nil
 		}, time.Minute).WithPolling(5 * time.Second).Should(Succeed())
-	}, SpecTimeout(2*time.Minute))
+	})
 }
 
 // ItShouldRejectUnauthenticatedVictoriaLogsRequestInShoot asserts that a request to the shoot VictoriaLogs ingress without credentials is rejected with HTTP 401.
@@ -218,7 +228,7 @@ func ItShouldBreakOpenTelemetryCollectorToken(tc *ShootContext) {
 			}
 			secret.Data["token"] = []byte(invalidToken)
 			g.Expect(tc.ShootClient.Patch(ctx, secret, patch)).To(Succeed())
-		}).Should(Succeed())
+		}).WithPolling(1 * time.Second).Should(Succeed())
 
 		restartGNA(ctx, tc)
 	}, SpecTimeout(2*time.Minute))
@@ -244,7 +254,7 @@ func ItShouldRestoreOpenTelemetryCollectorToken(tc *ShootContext) {
 
 			accessSecret.Annotations[resourcesv1alpha1.ServiceAccountTokenRenewTimestamp] = "1970-01-01T00:00:00Z"
 			g.Expect(tc.SeedClient.Patch(ctx, accessSecret, patch)).To(Succeed())
-		}).Should(Succeed())
+		}).WithPolling(time.Second).Should(Succeed())
 
 		Eventually(ctx, func(g Gomega) {
 			freshSecret := &corev1.Secret{}
@@ -255,7 +265,7 @@ func ItShouldRestoreOpenTelemetryCollectorToken(tc *ShootContext) {
 
 			g.Expect(string(freshSecret.Data["token"])).NotTo(Equal(invalidToken),
 				"token-requestor has not yet replaced the invalid token")
-		}).Should(Succeed())
+		}).WithPolling(time.Second).Should(Succeed())
 
 		restartGNA(ctx, tc)
 	}, SpecTimeout(3*time.Minute))
@@ -279,7 +289,7 @@ func restartGNA(ctx SpecContext, tc *ShootContext) {
 			nodeList.Items[i].Annotations[annotationRestartSystemdServices] = "gardener-node-agent"
 			g.Expect(tc.ShootClient.Patch(ctx, &nodeList.Items[i], patch)).To(Succeed())
 		}
-	}).Should(Succeed())
+	}).WithPolling(time.Second).Should(Succeed())
 
 	Eventually(ctx, func(g Gomega) {
 		nodeList := &corev1.NodeList{}
@@ -289,5 +299,5 @@ func restartGNA(ctx SpecContext, tc *ShootContext) {
 			g.Expect(node.Annotations[annotationRestartSystemdServices]).To(BeEmpty(),
 				"restart annotation still present on node %s", node.Name)
 		}
-	}).Should(Succeed())
+	}).WithPolling(time.Second).Should(Succeed())
 }
