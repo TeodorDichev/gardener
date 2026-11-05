@@ -84,6 +84,9 @@ func ShootLoggingVali(tc *ShootContext) {
 func ShootLoggingVl(tc *ShootContext) {
 	itShouldSetUpShootAndSeedContext(tc)
 
+	ItShouldHaveVictoriaLogsReady(tc)
+	ItShouldHaveVictoriaLogsReadyInGarden(tc.SeedContext)
+
 	gardenerLoggerName := "gardener-logger" + "-" + utilrand.String(randomLength)
 	nonGardenerLoggerName := "non-gardener-logger" + "-" + utilrand.String(randomLength)
 
@@ -113,8 +116,6 @@ func ShootLoggingVl(tc *ShootContext) {
 	ItShouldWaitForPodsInShootToBeReady(tc, "kube-system", labels.SelectorFromSet(map[string]string{"app": gardenerLoggerName}))
 	ItShouldWaitForPodsInShootToBeReady(tc, "kube-system", labels.SelectorFromSet(map[string]string{"app": nonGardenerLoggerName}))
 
-	ItShouldHaveVictoriaLogsReady(tc)
-	ItShouldHaveVictoriaLogsReadyInGarden(tc.SeedContext)
 	ItShouldRejectUnauthenticatedVictoriaLogsRequestInShoot(tc)
 	ItShouldRejectWrongCredentialsVictoriaLogsRequestInShoot(tc)
 
@@ -142,6 +143,9 @@ func ShootLoggingVl(tc *ShootContext) {
 func SeedLoggingVl(tc *ShootContext) {
 	itShouldSetUpShootAndSeedContext(tc)
 
+	ItShouldHaveVictoriaLogsReady(tc)
+	ItShouldHaveVictoriaLogsReadyInGarden(tc.SeedContext)
+
 	controlPlaneLoggerName := "seed-cp-logger" + "-" + utilrand.String(randomLength)
 	gardenNamespaceLoggerName := "seed-garden-ns-logger" + "-" + utilrand.String(randomLength)
 
@@ -167,8 +171,6 @@ func SeedLoggingVl(tc *ShootContext) {
 	gardenNsLoggerLabels := labels.SelectorFromSet(map[string]string{"app": gardenNamespaceLoggerName})
 	seed.ItShouldWaitForPodsInGardenNamespaceToBeReady(tc.SeedContext, gardenNsLoggerLabels)
 
-	ItShouldHaveVictoriaLogsReady(tc)
-	ItShouldHaveVictoriaLogsReadyInGarden(tc.SeedContext)
 	ItShouldRejectUnauthenticatedVictoriaLogsRequestInGarden(tc.SeedContext)
 	ItShouldRejectWrongCredentialsVictoriaLogsRequestInGarden(tc.SeedContext)
 
@@ -177,9 +179,6 @@ func SeedLoggingVl(tc *ShootContext) {
 
 	ItShouldWaitForLogsCountByKeyInVictoriaLogsInGarden(tc.SeedContext, "k8s.pod.name", gardenNamespaceLoggerName+".*", shootLogsCount)
 	ItShouldWaitForLogsNotByKeyInVictoriaLogsInGarden(tc.SeedContext, "k8s.pod.name", controlPlaneLoggerName+".*")
-
-	// cleaning up the garden, everything else is cleaned up when the shoot is deleted
-	seed.ItShouldDeleteTemplateFromGarden(tc.SeedContext, loggerAppName, gardenNsLoggerParams)
 }
 
 // ShootLogShipper verifies that the shoot's systemd OpenTelemetry collector log shipper self-heals after its
@@ -192,6 +191,8 @@ func SeedLoggingVl(tc *ShootContext) {
 // logging is enabled.
 func ShootLogShipper(tc *ShootContext) {
 	itShouldSetUpShootAndSeedContext(tc)
+
+	ItShouldHaveVictoriaLogsReady(tc)
 
 	brokenLoggerName := "broken-logger" + "-" + utilrand.String(randomLength)
 	recoveredLoggerName := "recovered-logger" + "-" + utilrand.String(randomLength)
@@ -211,12 +212,17 @@ func ShootLogShipper(tc *ShootContext) {
 		}
 	}
 
-	ItShouldHaveVictoriaLogsReady(tc)
-
 	ItShouldBreakOpenTelemetryCollectorToken(tc)
 
 	ItShouldRenderAndDeployTemplateToShoot(tc, loggerAppName, loggerParamsFor(brokenLoggerName))
 	ItShouldWaitForPodsInShootToBeReady(tc, "kube-system", labels.SelectorFromSet(map[string]string{"app": brokenLoggerName}))
+
+	// Validate that the Log Shipper is broken. 401 is non-retryable error so logs should not appear.
+	// If breaking the token takes too long, we might receive some logs before the token is invalidated.
+	// Option 1 - to exec on the node and validate that the systemd is receiving errors/file contents are edited
+	// Option 2 - sleep for some time - unreliable
+	// Option 3 - add an eventually around the consistently
+	// Option 4 - somehow update the code that the error thrown in the systemd log shipper be visible in gardener
 	ItShouldWaitForLogsNotByKeyInVictoriaLogsInShoot(tc, "k8s.pod.name", brokenLoggerName+".*")
 
 	ItShouldRestoreOpenTelemetryCollectorToken(tc)
@@ -237,6 +243,9 @@ func ShootLogShipper(tc *ShootContext) {
 func PerShootLoggingIsolation(tc1 *ShootContext, tc2 *ShootContext) {
 	itShouldSetUpShootAndSeedContext(tc1)
 	itShouldSetUpShootAndSeedContext(tc2)
+
+	ItShouldHaveVictoriaLogsReady(tc1)
+	ItShouldHaveVictoriaLogsReady(tc2)
 
 	controlPlane1LoggerName := "seed-cp1-logger" + "-" + utilrand.String(randomLength)
 	controlPlane2LoggerName := "seed-cp2-logger" + "-" + utilrand.String(randomLength)
@@ -262,9 +271,6 @@ func PerShootLoggingIsolation(tc1 *ShootContext, tc2 *ShootContext) {
 	ItShouldRenderAndDeployTemplateToShootControlPlane(tc2, loggerAppName, cp2LoggerParams)
 	cp2LoggerLabels := labels.SelectorFromSet(map[string]string{"app": controlPlane2LoggerName})
 	ItShouldWaitForPodsInShootControlPlaneToBeReady(tc2, cp2LoggerLabels)
-
-	ItShouldHaveVictoriaLogsReady(tc1)
-	ItShouldHaveVictoriaLogsReady(tc2)
 
 	ItShouldWaitForLogsCountByKeyInVictoriaLogsInShoot(tc1, "k8s.pod.name", controlPlane1LoggerName+".*", shootLogsCount)
 	ItShouldWaitForLogsNotByKeyInVictoriaLogsInShoot(tc1, "k8s.pod.name", controlPlane2LoggerName+".*")
