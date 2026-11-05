@@ -153,7 +153,6 @@ func SeedLoggingVl(tc *ShootContext) {
 		"LogsDuration": "20s",
 	}
 	ItShouldRenderAndDeployTemplateToShootControlPlane(tc, loggerAppName, cpLoggerParams)
-
 	cpLoggerLabels := labels.SelectorFromSet(map[string]string{"app": controlPlaneLoggerName})
 	ItShouldWaitForPodsInShootControlPlaneToBeReady(tc, cpLoggerLabels)
 
@@ -165,7 +164,6 @@ func SeedLoggingVl(tc *ShootContext) {
 		"LogsDuration":        "20s",
 	}
 	seed.ItShouldRenderAndDeployTemplateToGarden(tc.SeedContext, loggerAppName, gardenNsLoggerParams)
-
 	gardenNsLoggerLabels := labels.SelectorFromSet(map[string]string{"app": gardenNamespaceLoggerName})
 	seed.ItShouldWaitForPodsInGardenNamespaceToBeReady(tc.SeedContext, gardenNsLoggerLabels)
 
@@ -226,6 +224,53 @@ func ShootLogShipper(tc *ShootContext) {
 	ItShouldRenderAndDeployTemplateToShoot(tc, loggerAppName, loggerParamsFor(recoveredLoggerName))
 	ItShouldWaitForPodsInShootToBeReady(tc, "kube-system", labels.SelectorFromSet(map[string]string{"app": recoveredLoggerName}))
 	ItShouldWaitForLogsCountByKeyInVictoriaLogsInShoot(tc, "k8s.pod.name", recoveredLoggerName+".*", shootLogsCount)
+}
+
+// PerShootLoggingIsolation checks the per shoot logging stack isolation of VictoriaLogs.
+// It requires at least 2 shoots and tests the fluent bit dynamic routing per namespace.
+// It deploys 2 loggers - one in each shoot control-plane and then checks for cross-namespace isolation.
+//
+// Function is exposed so that it can be called from the context of another e2e test.
+// This is done so that we can minimize the number of shoot clusters that we create.
+//
+// The test expects that the VictoriaLogsBackend and OpenTelemetryCollector are true
+func PerShootLoggingIsolation(tc1 *ShootContext, tc2 *ShootContext) {
+	itShouldSetUpShootAndSeedContext(tc1)
+	itShouldSetUpShootAndSeedContext(tc2)
+
+	controlPlane1LoggerName := "seed-cp1-logger" + "-" + utilrand.String(randomLength)
+	controlPlane2LoggerName := "seed-cp2-logger" + "-" + utilrand.String(randomLength)
+
+	// We omit "HelmDeployNamespace" - because its known only at runtime
+	cp1LoggerParams := map[string]any{
+		"LoggerName":   controlPlane1LoggerName,
+		"AppLabel":     controlPlane1LoggerName,
+		"LogsCount":    shootLogsCount,
+		"LogsDuration": "20s",
+	}
+	ItShouldRenderAndDeployTemplateToShootControlPlane(tc1, loggerAppName, cp1LoggerParams)
+	cp1LoggerLabels := labels.SelectorFromSet(map[string]string{"app": controlPlane1LoggerName})
+	ItShouldWaitForPodsInShootControlPlaneToBeReady(tc1, cp1LoggerLabels)
+
+	// We omit "HelmDeployNamespace" - because its known only at runtime
+	cp2LoggerParams := map[string]any{
+		"LoggerName":   controlPlane2LoggerName,
+		"AppLabel":     controlPlane2LoggerName,
+		"LogsCount":    shootLogsCount,
+		"LogsDuration": "20s",
+	}
+	ItShouldRenderAndDeployTemplateToShootControlPlane(tc2, loggerAppName, cp2LoggerParams)
+	cp2LoggerLabels := labels.SelectorFromSet(map[string]string{"app": controlPlane2LoggerName})
+	ItShouldWaitForPodsInShootControlPlaneToBeReady(tc2, cp2LoggerLabels)
+
+	ItShouldHaveVictoriaLogsReady(tc1)
+	ItShouldHaveVictoriaLogsReady(tc2)
+
+	ItShouldWaitForLogsCountByKeyInVictoriaLogsInShoot(tc1, "k8s.pod.name", controlPlane1LoggerName+".*", shootLogsCount)
+	ItShouldWaitForLogsNotByKeyInVictoriaLogsInShoot(tc1, "k8s.pod.name", controlPlane2LoggerName+".*")
+
+	ItShouldWaitForLogsCountByKeyInVictoriaLogsInShoot(tc2, "k8s.pod.name", controlPlane2LoggerName+".*", shootLogsCount)
+	ItShouldWaitForLogsNotByKeyInVictoriaLogsInShoot(tc2, "k8s.pod.name", controlPlane1LoggerName+".*")
 }
 
 func itShouldSetUpShootAndSeedContext(tc *ShootContext) {
