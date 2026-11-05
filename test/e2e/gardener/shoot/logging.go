@@ -213,22 +213,19 @@ func ShootLogShipper(tc *ShootContext) {
 	}
 
 	ItShouldBreakOpenTelemetryCollectorToken(tc)
+	ItShouldWaitForInvalidTokenOnNodes(tc)
 
 	ItShouldRenderAndDeployTemplateToShoot(tc, loggerAppName, loggerParamsFor(brokenLoggerName))
 	ItShouldWaitForPodsInShootToBeReady(tc, "kube-system", labels.SelectorFromSet(map[string]string{"app": brokenLoggerName}))
-
-	// Validate that the Log Shipper is broken. 401 is non-retryable error so logs should not appear.
-	// If breaking the token takes too long, we might receive some logs before the token is invalidated.
-	// Option 1 - to exec on the node and validate that the systemd is receiving errors/file contents are edited
-	// Option 2 - sleep for some time - unreliable
-	// Option 3 - add an eventually around the consistently
-	// Option 4 - somehow update the code that the error thrown in the systemd log shipper be visible in gardener
 	ItShouldWaitForLogsNotByKeyInVictoriaLogsInShoot(tc, "k8s.pod.name", brokenLoggerName+".*")
 
 	ItShouldRestoreOpenTelemetryCollectorToken(tc)
 
 	ItShouldRenderAndDeployTemplateToShoot(tc, loggerAppName, loggerParamsFor(recoveredLoggerName))
 	ItShouldWaitForPodsInShootToBeReady(tc, "kube-system", labels.SelectorFromSet(map[string]string{"app": recoveredLoggerName}))
+
+	// No need to explicitly check that the contents of the token are the same
+	// because Eventually retries on error,
 	ItShouldWaitForLogsCountByKeyInVictoriaLogsInShoot(tc, "k8s.pod.name", recoveredLoggerName+".*", shootLogsCount)
 }
 

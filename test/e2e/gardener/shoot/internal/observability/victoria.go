@@ -6,7 +6,9 @@ package observability
 
 import (
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	victoriametricsv1 "github.com/VictoriaMetrics/operator/api/operator/v1"
@@ -20,7 +22,9 @@ import (
 
 	resourcesv1alpha1 "github.com/gardener/gardener/pkg/apis/resources/v1alpha1"
 	"github.com/gardener/gardener/pkg/client/kubernetes"
+	otelcollectorcomponent "github.com/gardener/gardener/pkg/component/extensions/operatingsystemconfig/original/components/opentelemetrycollector"
 	otelcollectorconstants "github.com/gardener/gardener/pkg/component/observability/opentelemetry/collector/constants"
+	"github.com/gardener/gardener/pkg/provider-local/controller/infrastructure"
 	. "github.com/gardener/gardener/test/e2e/gardener"
 	"github.com/gardener/gardener/test/utils/logging"
 )
@@ -207,6 +211,54 @@ func ItShouldBreakOpenTelemetryCollectorToken(tc *ShootContext) {
 
 		restartGNA(ctx, tc)
 	}, SpecTimeout(3*time.Minute))
+}
+
+// ItShouldWaitForInvalidTokenOnNodes execs into every machine pod and waits until
+// the auth-token file on disk contains the invalidToken value.
+func ItShouldWaitForInvalidTokenOnNodes(tc *ShootContext) {
+	GinkgoHelper()
+
+	It("Wait for invalid token to be written to nodes", func(ctx SpecContext) {
+		infraNamespace := infrastructure.NamespaceName(tc.Shoot.Status.TechnicalID)
+
+		Eventually(ctx, func() error {
+			podList := &corev1.PodList{}
+			if err := tc.SeedClient.List(ctx, podList,
+				client.InNamespace(infraNamespace),
+				client.MatchingLabels{"app": "machine", "machine-provider": "local"},
+			); err != nil {
+				return err
+			}
+
+			if len(podList.Items) == 0 {
+				return fmt.Errorf("no machine pods found in %s", infraNamespace)
+			}
+
+			for _, pod := range podList.Items {
+				stdout, _, err := tc.SeedClientSet.PodExecutor().Execute(
+					ctx,
+					infraNamespace,
+					pod.Name,
+					"node",
+					"cat", otelcollectorcomponent.PathAuthToken,
+				)
+				if err != nil {
+					return fmt.Errorf("exec on pod %s failed: %w", pod.Name, err)
+				}
+
+				content, err := io.ReadAll(stdout)
+				if err != nil {
+					return fmt.Errorf("reading stdout from pod %s: %w", pod.Name, err)
+				}
+
+				if got := strings.TrimSpace(string(content)); got != invalidToken {
+					return fmt.Errorf("pod %s: auth-token file contains %q, want %q", pod.Name, got, invalidToken)
+				}
+			}
+
+			return nil
+		}).Should(Succeed())
+	}, SpecTimeout(2*time.Minute))
 }
 
 // ItShouldRestoreOpenTelemetryCollectorToken forces the token-requestor to re-issue a fresh valid token into the shoot's
