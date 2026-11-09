@@ -44,7 +44,7 @@ func ShootLoggingVali(tc *ShootContext) {
 		"HelmDeployNamespace": "kube-system",
 		"AppLabel":            gardenerLoggerName,
 		"LogsCount":           shootLogsCount,
-		"LogsDuration":        "20s",
+		"LogsDuration":        "5s",
 		"AdditionalLabels": map[string]string{
 			"origin":                              "gardener",
 			"gardener.cloud/role":                 "system-component",
@@ -58,7 +58,7 @@ func ShootLoggingVali(tc *ShootContext) {
 		"HelmDeployNamespace": "kube-system",
 		"AppLabel":            nonGardenerLoggerName,
 		"LogsCount":           shootLogsCount,
-		"LogsDuration":        "20s",
+		"LogsDuration":        "5s",
 	}
 	ItShouldRenderAndDeployTemplateToShoot(tc, loggerAppName, loggerParams)
 
@@ -95,7 +95,7 @@ func ShootLoggingVl(tc *ShootContext) {
 		"HelmDeployNamespace": "kube-system",
 		"AppLabel":            gardenerLoggerName,
 		"LogsCount":           shootLogsCount,
-		"LogsDuration":        "20s",
+		"LogsDuration":        "5s",
 		"AdditionalLabels": map[string]string{
 			"origin":                              "gardener",
 			"gardener.cloud/role":                 "system-component",
@@ -109,7 +109,7 @@ func ShootLoggingVl(tc *ShootContext) {
 		"HelmDeployNamespace": "kube-system",
 		"AppLabel":            nonGardenerLoggerName,
 		"LogsCount":           shootLogsCount,
-		"LogsDuration":        "20s",
+		"LogsDuration":        "5s",
 	}
 	ItShouldRenderAndDeployTemplateToShoot(tc, loggerAppName, loggerParams)
 
@@ -154,7 +154,7 @@ func SeedLoggingVl(tc *ShootContext) {
 		"LoggerName":   controlPlaneLoggerName,
 		"AppLabel":     controlPlaneLoggerName,
 		"LogsCount":    shootLogsCount,
-		"LogsDuration": "20s",
+		"LogsDuration": "5s",
 	}
 	ItShouldRenderAndDeployTemplateToShootControlPlane(tc, loggerAppName, cpLoggerParams)
 	cpLoggerLabels := labels.SelectorFromSet(map[string]string{"app": controlPlaneLoggerName})
@@ -165,7 +165,7 @@ func SeedLoggingVl(tc *ShootContext) {
 		"HelmDeployNamespace": "garden",
 		"AppLabel":            gardenNamespaceLoggerName,
 		"LogsCount":           shootLogsCount,
-		"LogsDuration":        "20s",
+		"LogsDuration":        "5s",
 	}
 	seed.ItShouldRenderAndDeployTemplateToGarden(tc.SeedContext, loggerAppName, gardenNsLoggerParams)
 	gardenNsLoggerLabels := labels.SelectorFromSet(map[string]string{"app": gardenNamespaceLoggerName})
@@ -202,7 +202,7 @@ func ShootLogShipper(tc *ShootContext) {
 		"HelmDeployNamespace": "kube-system",
 		"AppLabel":            brokenLoggerName,
 		"LogsCount":           shootLogsCount,
-		"LogsDuration":        "20s",
+		"LogsDuration":        "5s",
 		"AdditionalLabels": map[string]string{
 			"origin":                              "gardener",
 			"gardener.cloud/role":                 "system-component",
@@ -215,7 +215,7 @@ func ShootLogShipper(tc *ShootContext) {
 		"HelmDeployNamespace": "kube-system",
 		"AppLabel":            recoveredLoggerName,
 		"LogsCount":           shootLogsCount,
-		"LogsDuration":        "20s",
+		"LogsDuration":        "5s",
 		"AdditionalLabels": map[string]string{
 			"origin":                              "gardener",
 			"gardener.cloud/role":                 "system-component",
