@@ -26,4 +26,9 @@ else
   timeout_flag=-timeout=10m
 fi
 
-GO111MODULE=on go test ${timeout_flag:-} $@ $test_flags | grep -v 'no test files'
+BUILD_TAGS=""
+if [ "$(uname -s)" = "Linux" ]; then
+  BUILD_TAGS="-tags=musl"
+fi
+
+GO111MODULE=on go test ${BUILD_TAGS} ${timeout_flag:-} $@ $test_flags | grep -v 'no test files'
