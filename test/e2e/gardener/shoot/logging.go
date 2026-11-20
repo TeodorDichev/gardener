@@ -116,6 +116,39 @@ func SeedLoggingVl(tc *ShootContext) {
 	ItShouldWaitForLogsByKeyNotToBeInGardenVictoriaLogs(tc.SeedContext, "k8s.pod.name", controlPlaneLoggerName+".*")
 }
 
+// ShootLogShipper verifies that the shoot's systemd OpenTelemetry collector log shipper self-heals after its
+// auth token is broken and later restored.
+//
+// Function is exposed so that it can be called from the context of another e2e test. This is done so that we can
+// minimize the number of shoot clusters that we create.
+func ShootLogShipper(tc *ShootContext) {
+	itShouldSetUpShootAndSeedContext(tc)
+
+	ItShouldHaveShootVictoriaLogsReady(tc)
+
+	brokenLoggerName := "broken-logger" + "-" + utilrand.String(randomLength)
+	recoveredLoggerName := "recovered-logger" + "-" + utilrand.String(randomLength)
+
+	// The shoot-side token secret has a 720h lifespan; GRM reconciles at 80%.
+	// Patching it directly is safe - no restoration will happen during the test.
+	ItShouldBreakOpenTelemetryCollectorToken(tc)
+	ItShouldRestartGNA(tc)
+	ItShouldWaitForInvalidTokenOnNodes(tc)
+	ItShouldRestartOpenTelemetryCollectorOnNodes(tc)
+
+	ItShouldRenderAndDeployTemplateToShootDataPlane(tc, "kube-system", loggerAppName, gardenerLoggerParams(brokenLoggerName))
+	ItShouldWaitForPodsInShootToBeReady(tc, "kube-system", labels.SelectorFromSet(map[string]string{"app": brokenLoggerName}))
+	ItShouldWaitForLogsByKeyNotToBeInShootVictoriaLogs(tc, "k8s.pod.name", brokenLoggerName+".*")
+
+	ItShouldRestoreOpenTelemetryCollectorToken(tc)
+	ItShouldRestartGNA(tc)
+	ItShouldWaitForValidTokenOnNodes(tc)
+
+	ItShouldRenderAndDeployTemplateToShootDataPlane(tc, "kube-system", loggerAppName, gardenerLoggerParams(recoveredLoggerName))
+	ItShouldWaitForPodsInShootToBeReady(tc, "kube-system", labels.SelectorFromSet(map[string]string{"app": recoveredLoggerName}))
+	ItShouldWaitForLogsCountByKeyToBeInShootVictoriaLogs(tc, "k8s.pod.name", recoveredLoggerName+".*", shootLogsCount)
+}
+
 func itShouldSetUpShootAndSeedContext(tc *ShootContext) {
 	ItShouldWaitForShootToBeReconciledAndHealthy(tc)
 	ItShouldInitializeShootClient(tc)
