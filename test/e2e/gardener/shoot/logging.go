@@ -149,6 +149,35 @@ func ShootLogShipper(tc *ShootContext) {
 	ItShouldWaitForLogsCountByKeyToBeInShootVictoriaLogs(tc, "k8s.pod.name", recoveredLoggerName+".*", shootLogsCount)
 }
 
+// PerShootLoggingIsolation checks the per shoot logging stack isolation of VictoriaLogs.
+// It requires at least 2 shoots and tests the fluent bit dynamic routing per namespace.
+// It deploys 2 loggers - one in each shoot control-plane and then checks for cross-namespace isolation.
+//
+// Function is exposed so that it can be called from the context of another e2e test.
+// This is done so that we can minimize the number of shoot clusters that we create.
+func PerShootLoggingIsolation(tc1 *ShootContext, tc2 *ShootContext) {
+	itShouldSetUpShootAndSeedContext(tc1)
+	itShouldSetUpShootAndSeedContext(tc2)
+
+	ItShouldHaveShootVictoriaLogsReady(tc1)
+	ItShouldHaveShootVictoriaLogsReady(tc2)
+
+	controlPlane1LoggerName := "seed-cp1-logger" + "-" + utilrand.String(randomLength)
+	controlPlane2LoggerName := "seed-cp2-logger" + "-" + utilrand.String(randomLength)
+
+	ItShouldRenderAndDeployTemplateToShootControlPlane(tc1, loggerAppName, nonGardenerLoggerParams(controlPlane1LoggerName))
+	ItShouldWaitForPodsInShootControlPlaneToBeReady(tc1, labels.SelectorFromSet(map[string]string{"app": controlPlane1LoggerName}))
+
+	ItShouldRenderAndDeployTemplateToShootControlPlane(tc2, loggerAppName, nonGardenerLoggerParams(controlPlane2LoggerName))
+	ItShouldWaitForPodsInShootControlPlaneToBeReady(tc2, labels.SelectorFromSet(map[string]string{"app": controlPlane2LoggerName}))
+
+	ItShouldWaitForLogsCountByKeyToBeInShootVictoriaLogs(tc1, "k8s.pod.name", controlPlane1LoggerName+".*", shootLogsCount)
+	ItShouldWaitForLogsByKeyNotToBeInShootVictoriaLogs(tc1, "k8s.pod.name", controlPlane2LoggerName+".*")
+
+	ItShouldWaitForLogsCountByKeyToBeInShootVictoriaLogs(tc2, "k8s.pod.name", controlPlane2LoggerName+".*", shootLogsCount)
+	ItShouldWaitForLogsByKeyNotToBeInShootVictoriaLogs(tc2, "k8s.pod.name", controlPlane1LoggerName+".*")
+}
+
 func itShouldSetUpShootAndSeedContext(tc *ShootContext) {
 	ItShouldWaitForShootToBeReconciledAndHealthy(tc)
 	ItShouldInitializeShootClient(tc)
