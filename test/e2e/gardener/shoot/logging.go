@@ -83,6 +83,39 @@ func ShootLoggingVl(tc *ShootContext) {
 	ItShouldWaitForLogsByKeyToBeInShootVictoriaLogs(tc, "k8s.pod.name", "event-logger"+".*")
 }
 
+// SeedLoggingVl checks the seed-side routing of the shoot logging stack of VictoriaLogs.
+// It deploys two logger applications. One in the shoot's control-plane namespace on the
+// seed, and another in the seed's garden namespace. Both loggers are asserted to appear
+// only in their respective VictoriaLogs instance and not in the other.
+// Garden VictoriaLogs ingress auth is also verified.
+//
+// Function is exposed so that it can be called from the context of another e2e test.
+// This is done so that we can minimize the number of shoot clusters that we create.
+func SeedLoggingVl(tc *ShootContext) {
+	itShouldSetUpShootAndSeedContext(tc)
+
+	ItShouldHaveShootVictoriaLogsReady(tc)
+	ItShouldHaveGardenVictoriaLogsReady(tc.SeedContext)
+
+	controlPlaneLoggerName := "seed-cp-logger" + "-" + utilrand.String(randomLength)
+	gardenNamespaceLoggerName := "seed-garden-ns-logger" + "-" + utilrand.String(randomLength)
+
+	ItShouldRenderAndDeployTemplateToShootControlPlane(tc, loggerAppName, nonGardenerLoggerParams(controlPlaneLoggerName))
+	ItShouldWaitForPodsInShootControlPlaneToBeReady(tc, labels.SelectorFromSet(map[string]string{"app": controlPlaneLoggerName}))
+
+	seed.ItShouldRenderAndDeployTemplateToSeed(tc.SeedContext, "garden", loggerAppName, nonGardenerLoggerParams(gardenNamespaceLoggerName))
+	seed.ItShouldWaitForPodsInGardenNamespaceToBeReady(tc.SeedContext, labels.SelectorFromSet(map[string]string{"app": gardenNamespaceLoggerName}))
+
+	ItShouldRejectUnauthenticatedVictoriaLogsRequestInGarden(tc.SeedContext)
+	ItShouldRejectWrongCredentialsVictoriaLogsRequestInGarden(tc.SeedContext)
+
+	ItShouldWaitForLogsCountByKeyToBeInShootVictoriaLogs(tc, "k8s.pod.name", controlPlaneLoggerName+".*", shootLogsCount)
+	ItShouldWaitForLogsByKeyNotToBeInShootVictoriaLogs(tc, "k8s.pod.name", gardenNamespaceLoggerName+".*")
+
+	ItShouldWaitForLogsCountByKeyToBeInGardenVictoriaLogs(tc.SeedContext, "k8s.pod.name", gardenNamespaceLoggerName+".*", shootLogsCount)
+	ItShouldWaitForLogsByKeyNotToBeInGardenVictoriaLogs(tc.SeedContext, "k8s.pod.name", controlPlaneLoggerName+".*")
+}
+
 func itShouldSetUpShootAndSeedContext(tc *ShootContext) {
 	ItShouldWaitForShootToBeReconciledAndHealthy(tc)
 	ItShouldInitializeShootClient(tc)
